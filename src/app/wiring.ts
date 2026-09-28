@@ -14,6 +14,8 @@ import { ReportsService } from '../modules/reports/application/reports.service.j
 import { RuleRepository } from '../modules/rules/infra/rule.repository.js';
 import { CreateTransactionUseCase } from '../modules/transactions/application/create-transaction.use-case.js';
 import { TransactionRepository } from '../modules/transactions/infra/transaction.repository.js';
+import { SpendingGoalRepository } from '../modules/goals/infra/spending-goal.repository.js';
+import { SpendingGoalsAppService } from '../modules/goals/application/spending-goals.app-service.js';
 import { EnsureUserUseCase } from '../modules/users/application/ensure-user.use-case.js';
 import { UserRepository } from '../modules/users/infra/user.repository.js';
 import type { Logger } from 'pino';
@@ -75,6 +77,13 @@ export function buildWiring(logger?: Logger): AppWiring {
     logger,
   );
 
+  const spendingGoals = new SpendingGoalsAppService(
+    new SpendingGoalRepository(),
+    transactions,
+    categories,
+    logger,
+  );
+
   const ingest = new IngestInboundUseCase(
     ensureUser,
     users,
@@ -89,6 +98,7 @@ export function buildWiring(logger?: Logger): AppWiring {
     audit,
     outbound,
     reminders,
+    spendingGoals,
     logger,
   );
 

@@ -113,6 +113,30 @@ describe('FinancialParserService', () => {
     expect(r.intent).toBe(UserIntent.GET_TODAY_SUMMARY);
   });
 
+  it('resumo da semana e variações', () => {
+    for (const text of [
+      'resumo da semana',
+      'resumo semanal',
+      'quanto gastei essa semana?',
+      'gastos da semana',
+      'saldo da semana',
+      'onde gastei mais nesta semana?',
+    ]) {
+      expect(parseText(text).intent, text).toBe(UserIntent.GET_WEEK_SUMMARY);
+    }
+  });
+
+  it('semana passada é um resumo separado da semana atual', () => {
+    for (const text of [
+      'resumo da semana passada',
+      'quanto gastei na semana passada?',
+      'gastos da semana anterior',
+      'resumo da última semana',
+    ]) {
+      expect(parseText(text).intent, text).toBe(UserIntent.GET_LAST_WEEK_SUMMARY);
+    }
+  });
+
   it('reconhece resumo mensal', () => {
     const r = parseText('quanto gastei esse mês?');
     expect(r.intent).toBe(UserIntent.GET_MONTH_SUMMARY);

@@ -20,7 +20,7 @@ export class FfmpegAudioConverter {
       p.on('error', reject);
       p.on('close', (code) => {
         if (code === 0) resolve();
-        else reject(new Error(`ffmpeg exited with code ${String(code ?? 'unknown')}`));
+        else reject(new Error(`ffmpeg terminou com código ${String(code ?? 'desconhecido')}`));
       });
     });
   }

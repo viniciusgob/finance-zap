@@ -11,7 +11,7 @@ import { addHours } from 'date-fns';
 import type { Logger } from 'pino';
 import { env } from '../../../config/env.js';
 import type { NormalizedIngestMessage } from '../../../shared/domain/ingest-message.js';
-import { accountKeyFromWaChatJid } from '../../../shared/utils/whatsapp-jid.js';
+import { accountKeyFromWaChatJid, isGroupJid } from '../../../shared/utils/whatsapp-jid.js';
 import { UserIntent, ParseStatus, type UserIntentType } from '../../../shared/types/intent.js';
 import { unlinkIgnoreMissing } from '../../../shared/utils/unlink-ignore-missing.js';
 import { normalizeDescription, normalizeForMatch } from '../../../shared/utils/normalize-text.js';
@@ -87,6 +87,7 @@ import {
   replyReportScopeUnclear,
   replySoftUnknown,
   replyTodayLedger,
+  replyWeekLedger,
   replyTopExpenses,
   replyTranscriptionEmpty,
   replyTransferRegistered,
@@ -97,6 +98,7 @@ import {
 import type { EnsureUserUseCase } from '../../users/application/ensure-user.use-case.js';
 import type { UserRepository } from '../../users/infra/user.repository.js';
 import type { RemindersAppService } from '../../reminders/application/reminders.app-service.js';
+import type { SpendingGoalsAppService } from '../../goals/application/spending-goals.app-service.js';
 import type { MessageRepository } from '../infra/message.repository.js';
 import {
   isAffirmative,
@@ -125,9 +127,11 @@ function isSameAmountCreateParsed(parsed: ParseResult, draft: TransactionDraftPa
   return new Decimal(draft.amount).equals(parsed.amount);
 }
 
-function parseReportScopeReply(text: string): 'DAY' | 'MONTH' | null {
+function parseReportScopeReply(text: string): 'DAY' | 'WEEK' | 'LAST_WEEK' | 'MONTH' | null {
   const n = normalizeForMatch(text);
   if (n.length > 48) return null;
+  if (/\b(semana passada|semana anterior|ultima semana)\b/.test(n)) return 'LAST_WEEK';
+  if (/\b(semana|semanal)\b/.test(n)) return 'WEEK';
   const monthWords =
     /\b(este mes|este mês|esse mes|esse mês|neste mes|neste mês|mes atual|mês atual|mensal)\b/.test(
       n,
@@ -149,6 +153,8 @@ function isQueryIntentThatAbandonsPending(intent: UserIntentType): boolean {
     case UserIntent.HELP:
     case UserIntent.GREETING:
     case UserIntent.GET_TODAY_SUMMARY:
+    case UserIntent.GET_WEEK_SUMMARY:
+    case UserIntent.GET_LAST_WEEK_SUMMARY:
     case UserIntent.GET_MONTH_SUMMARY:
     case UserIntent.GET_CATEGORY_BREAKDOWN:
     case UserIntent.GET_TOP_EXPENSES:
@@ -203,6 +209,7 @@ export class IngestInboundUseCase {
     private readonly audit: AuditService,
     private readonly outbound: OutboundMessagesPort,
     private readonly reminders: RemindersAppService,
+    private readonly spendingGoals: SpendingGoalsAppService,
     private readonly log?: Logger,
   ) {}
 
@@ -261,7 +268,13 @@ export class IngestInboundUseCase {
 
     let suppressGreetingReply = false;
     if (user.onboardingWelcomeSentAt == null && isFirstInbound && !skipWelcomeForReset) {
-      const who = firstNameFromPush(user.displayName ?? event.pushName);
+      // Grupo: saúda pelo nome do grupo inteiro (é a conta compartilhada), não pelo primeiro nome.
+      const groupName = user.displayName?.trim() ?? '';
+      const who = isGroupJid(replyJid)
+        ? groupName !== ''
+          ? groupName
+          : 'pessoal'
+        : firstNameFromPush(user.displayName ?? event.pushName);
       await this.safeSend(replyJid, replyOnboardingWelcome(who));
       await this.users.markOnboardingWelcomeSent(user.id, new Date());
       suppressGreetingReply = true;
@@ -464,6 +477,13 @@ export class IngestInboundUseCase {
       }
 
       const now = new Date();
+      // Antes do parser financeiro: "meta semanal 300" não é um gasto de 300.
+      const goalResult = await this.spendingGoals.handleInbound(userId, seg, userTimezone, now);
+      if (goalResult.handled) {
+        await this.safeSend(replyJid, goalResult.message);
+        continue;
+      }
+
       const reminderResult = await this.reminders.handleInbound(
         userId,
         seg,
@@ -555,6 +575,16 @@ export class IngestInboundUseCase {
     const active = await this.pending.findLatestActive(userId, new Date());
     if (!active) return false;
 
+    // Comando de meta abandona perguntas pendentes (tipo, categoria, período do resumo).
+    if (
+      active.contextType !== PendingContextType.CONFIRM_AUDIO_TRANSCRIPT &&
+      active.contextType !== PendingContextType.CONFIRM_RECEIPT_OCR &&
+      this.spendingGoals.parseCommand(text).kind !== 'NONE'
+    ) {
+      await this.pending.deleteById(active.id);
+      return false;
+    }
+
     if (active.contextType === PendingContextType.CONFIRM_AUDIO_TRANSCRIPT) {
       const payload = AudioTranscriptPayloadSchema.safeParse(active.payload);
       if (!payload.success) {
@@ -642,6 +672,8 @@ export class IngestInboundUseCase {
         const breakdown = await this.reports.categoryBreakdownToday(userId, userTimezone);
         const top = await this.reports.topExpensesToday(userId, userTimezone, 5);
         await this.safeSend(replyJid, replyTodayLedger(day, breakdown, top));
+      } else if (scope === 'WEEK' || scope === 'LAST_WEEK') {
+        await this.sendWeekLedger(userId, replyJid, userTimezone, scope === 'LAST_WEEK' ? 1 : 0);
       } else {
         const { current, previous } = await this.reports.compareToPreviousMonth(
           userId,
@@ -915,6 +947,12 @@ export class IngestInboundUseCase {
         await this.safeSend(replyJid, replyTodayLedger(day, breakdown, top));
         return;
       }
+      case UserIntent.GET_WEEK_SUMMARY:
+        await this.sendWeekLedger(userId, replyJid, timeZone, 0);
+        return;
+      case UserIntent.GET_LAST_WEEK_SUMMARY:
+        await this.sendWeekLedger(userId, replyJid, timeZone, 1);
+        return;
       case UserIntent.GET_MONTH_SUMMARY: {
         const { current, previous } = await this.reports.compareToPreviousMonth(userId, timeZone);
         const breakdown = await this.reports.categoryBreakdown(userId, timeZone);
@@ -1040,6 +1078,24 @@ export class IngestInboundUseCase {
     }
   }
 
+  /** `weekOffset` 0 = semana atual (desde segunda), 1 = semana passada. Semanas nunca se misturam. */
+  private async sendWeekLedger(
+    userId: string,
+    replyJid: string,
+    timeZone: string,
+    weekOffset: 0 | 1,
+  ): Promise<void> {
+    const now = new Date();
+    const week = await this.reports.weeklySummary(userId, timeZone, now, weekOffset);
+    const breakdown = await this.reports.categoryBreakdownWeek(userId, timeZone, now, weekOffset);
+    const byDay = await this.reports.expensesByDayWeek(userId, timeZone, now, weekOffset);
+    const top = await this.reports.topExpensesWeek(userId, timeZone, 5, now, weekOffset);
+    await this.safeSend(
+      replyJid,
+      replyWeekLedger(week, breakdown, byDay, top, { lastWeek: weekOffset === 1 }),
+    );
+  }
+
   private async replyCreated(
     replyJid: string,
     type: TransactionType,
@@ -1054,19 +1110,30 @@ export class IngestInboundUseCase {
     const cat = categoryId ? cats.find((c) => c.id === categoryId) : undefined;
     const place = description.slice(0, 40);
     const dateLabel = occurrenceLabelForReply(occurredAt, new Date(), userTimezone);
+    if (type === TransactionType.EXPENSE) {
+      let goalLines: string[] = [];
+      try {
+        goalLines = await this.spendingGoals.balanceLinesForExpense(
+          userId,
+          categoryId ?? null,
+          occurredAt,
+          userTimezone,
+        );
+      } catch (err: unknown) {
+        if (this.log) this.log.warn({ err, userId }, 'Falha ao calcular saldo das metas');
+      }
+      await this.safeSend(
+        replyJid,
+        replyExpenseRegistered(amount, place, cat?.name ?? 'Outros', dateLabel, goalLines),
+      );
+      return;
+    }
     let dayBalance: Decimal | undefined;
     try {
       const day = await this.reports.dailySummary(userId, userTimezone);
       dayBalance = day.balance;
     } catch {
       dayBalance = undefined;
-    }
-    if (type === TransactionType.EXPENSE) {
-      await this.safeSend(
-        replyJid,
-        replyExpenseRegistered(amount, place, cat?.name ?? 'Outros', dateLabel, dayBalance),
-      );
-      return;
     }
     if (type === TransactionType.INCOME) {
       await this.safeSend(replyJid, replyIncomeRegistered(amount, place, dateLabel, dayBalance));

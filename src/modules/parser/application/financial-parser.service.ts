@@ -276,6 +276,9 @@ function isGreetingOnly(normalized: string): boolean {
   );
 }
 
+/** Semana anterior (segunda a domingo passados) — nunca misturada com a semana atual. */
+const LAST_WEEK_RE = /\b(semana passada|semana anterior|ultima semana)\b/;
+
 function detectReportIntent(normalized: string): UserIntentType | null {
   if (/\b(ajuda|help|comandos|instrucoes|instruções|menu)\b/.test(normalized)) {
     return UserIntent.HELP;
@@ -290,6 +293,12 @@ function detectReportIntent(normalized: string): UserIntentType | null {
     if (/\b(hoje|ontem|neste dia|nesse dia|no dia|durante o dia)\b/.test(normalized)) {
       return UserIntent.GET_TODAY_SUMMARY;
     }
+    if (LAST_WEEK_RE.test(normalized)) {
+      return UserIntent.GET_LAST_WEEK_SUMMARY;
+    }
+    if (/\b(semana|semanal)\b/.test(normalized)) {
+      return UserIntent.GET_WEEK_SUMMARY;
+    }
     return UserIntent.GET_CATEGORY_BREAKDOWN;
   }
 
@@ -301,6 +310,10 @@ function detectReportIntent(normalized: string): UserIntentType | null {
   const wantsToday =
     scopeBase && /\b(hoje|neste dia|nesse dia|no dia|durante o dia)\b/.test(normalized);
 
+  /** Checado antes do mês: "quanto gastei essa semana" também casa com "quanto gastei". */
+  const wantsWeek =
+    (scopeBase || /\bsaldo\b/.test(normalized)) && /\b(semana|semanal)\b/.test(normalized);
+
   const wantsMonth =
     /\b(quanto gastei|total de gastos|gastos do mes|gastos do mês|resumo do mes|resumo do mês|saldo do mes|saldo do mês|gastos no mes|gastos no mês|gastos deste mes|gastos deste mês|gastos esse mes|gastos esse mês|quanto gastei no mes|quanto gastei no mês|quanto gastei esse mes|quanto gastei esse mês|balanco do mes|balanço do mês|balanco do mês)\b/.test(
       normalized,
@@ -310,12 +323,17 @@ function detectReportIntent(normalized: string): UserIntentType | null {
         normalized,
       ));
 
-  if (/\bresumo\b/.test(normalized) && !wantsToday && !wantsMonth) {
+  if (/\bresumo\b/.test(normalized) && !wantsToday && !wantsWeek && !wantsMonth) {
     return UserIntent.CLARIFY_REPORT_PERIOD;
   }
 
   if (wantsToday) {
     return UserIntent.GET_TODAY_SUMMARY;
+  }
+  if (wantsWeek) {
+    return LAST_WEEK_RE.test(normalized)
+      ? UserIntent.GET_LAST_WEEK_SUMMARY
+      : UserIntent.GET_WEEK_SUMMARY;
   }
   if (wantsMonth) {
     return UserIntent.GET_MONTH_SUMMARY;

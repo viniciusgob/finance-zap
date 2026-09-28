@@ -3,7 +3,7 @@ dist
 .env
 coverage
 .wwebjs_auth
-baileys_auth
+baileys_auth*
 storage
 *.log
 yarn-error.log
@@ -14,3 +14,6 @@ vendor/whisper/**
 !vendor/whisper/.gitkeep
 vendor/ffmpeg/**
 !vendor/ffmpeg/.gitkeep
+
+# Cache de idiomas do tesseract.js (baixado no primeiro OCR)
+*.traineddata

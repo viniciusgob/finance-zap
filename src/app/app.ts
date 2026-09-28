@@ -23,7 +23,7 @@ export async function buildHttpApp(wiring: AppWiring): Promise<FastifyInstance> 
       typeof (error as { statusCode?: number }).statusCode === 'number'
         ? (error as { statusCode: number }).statusCode
         : 500;
-    app.log.error({ err }, 'Unhandled error');
+    app.log.error({ err }, 'Erro não tratado');
     void reply.status(status).send({
       error: err.name,
       message: err.message,

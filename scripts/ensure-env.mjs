@@ -7,9 +7,11 @@ const examplePath = resolve(root, '.env.example');
 
 if (!existsSync(envPath)) {
   if (!existsSync(examplePath)) {
-    console.error('Missing .env.example');
+    console.error('Arquivo .env.example não encontrado');
     process.exit(1);
   }
   copyFileSync(examplePath, envPath);
-  console.warn('[finance-zap] Created .env from .env.example — review secrets before production.');
+  console.warn(
+    '[finance-zap] .env criado a partir do .env.example — revise os segredos antes de ir para produção.',
+  );
 }

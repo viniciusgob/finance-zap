@@ -76,6 +76,12 @@ enum ReminderRecurrence {
   MONTHLY
 }
 
+enum GoalPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
 enum ReminderSource {
   TEXT
   AUDIO
@@ -89,10 +95,10 @@ model User {
   waChatJid               String?   @map("wa_chat_jid")
   timezone                String    @default("America/Sao_Paulo")
   locale                  String    @default("pt-BR")
-  onboardingWelcomeSentAt DateTime? @map("onboarding_welcome_sent_at")
-  lastInboundAt           DateTime? @map("last_inbound_at")
+  onboardingWelcomeSentAt DateTime? @map("onboarding_welcome_sent_at") @db.Timestamptz(6)
+  lastInboundAt           DateTime? @map("last_inbound_at") @db.Timestamptz(6)
   lastDailySummaryForDate String?   @map("last_daily_summary_for_date")
-  lastPinNudgeAt          DateTime? @map("last_pin_nudge_at")
+  lastPinNudgeAt          DateTime? @map("last_pin_nudge_at") @db.Timestamptz(6)
   createdAt               DateTime  @default(now()) @map("created_at")
   updatedAt               DateTime  @updatedAt @map("updated_at")
 
@@ -104,7 +110,9 @@ model User {
   auditLogs            AuditLog[]
   pendingConfirmations PendingConfirmation[]
   reminders            UserReminder[]
+  spendingGoals        SpendingGoal[]
 
+  @@index([waChatJid])
   @@map("users")
 }
 
@@ -147,6 +155,7 @@ model Category {
   transactions      Transaction[]
   rules             Rule[]
   recurringPatterns RecurringPattern[]
+  spendingGoals     SpendingGoal[]
 
   @@index([userId, normalizedName])
   @@index([isSystem, normalizedName])
@@ -290,4 +299,23 @@ model ReminderDelivery {
   @@unique([reminderId, slotAt])
   @@index([reminderId])
   @@map("reminder_deliveries")
+}
+
+/// Meta (limite) de gasto por período: geral (categoryId nulo) ou por categoria.
+model SpendingGoal {
+  id         String     @id @default(uuid()) @db.Uuid
+  userId     String     @map("user_id") @db.Uuid
+  categoryId String?    @map("category_id") @db.Uuid
+  /// "all" para meta geral ou o id da categoria — garante uma meta por escopo.
+  scopeKey   String     @map("scope_key")
+  period     GoalPeriod
+  amount     Decimal    @db.Decimal(18, 4)
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category Category? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scopeKey])
+  @@map("spending_goals")
 }

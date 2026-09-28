@@ -13,6 +13,8 @@ Pessoas que querem anotar **gastos** e **receitas**, além de **agenda e lembret
 | Gasto | `uber 23,50`, `gastei 40 no mercado` |
 | Receita | `recebi 1200`, `recebi 80 de fulano` |
 | Vários de uma vez | `uber 10, mercado 40` (separados por vírgula) |
+| Meta de gasto | `meta semanal 300`, `meta mensal mercado 800`, `meta diária transporte 40` |
+| Ver / apagar metas | `metas`, `apagar meta semanal`, `apagar meta de mercado`, `apagar todas as metas` |
 | Resumo | `resumo` → o bot pergunta *hoje* ou *mês* |
 | Ajuda | `ajuda` |
 | Corrigir último valor | `corrige o último para 59,90` |
@@ -46,6 +48,19 @@ Mensagens automáticas (após migrações e com campos em `users`):
 - Compromisso **com hora**: aviso padrão **15 minutos antes** (`REMINDER_EARLY_MINUTES`).
 - Só **data** (dia inteiro): notificação no início do dia local, na hora padrão `REMINDER_DEFAULT_DAY_HOUR` (padrão 9h).
 - Recorrência simples: **todo dia** (com hora), **toda semana** (mesmo dia da semana + hora, quando a frase pedir), **todo mês dia N**.
+
+**Metas de gasto** (`src/modules/goals/`)
+
+- Uma meta por escopo: **geral** (todas as despesas) ou por **categoria** (`mercado`, `transporte`, `uber` → Transporte…). Definir de novo substitui valor e período.
+- Períodos: **diária**, **semanal** (segunda a domingo) ou **mensal**, no fuso do usuário. Sem período informado, assume mensal.
+- A cada gasto registrado (texto, áudio ou cupom), a confirmação mostra o saldo das metas afetadas (geral + categoria do gasto), avisa com 20% ou menos restante e quando estoura.
+- Comandos de meta são tratados antes do parser financeiro (`meta semanal 300` não vira gasto de 300). Tabela `spending_goals` (`SpendingGoal` no Prisma).
+
+**Grupos do WhatsApp**
+
+- Adicione o número do bot a um grupo: o grupo vira uma **conta compartilhada** (`users.whatsapp_number = group:<id>`), separada das contas pessoais dos participantes. Nome da conta = nome do grupo.
+- Todas as mensagens do grupo são tratadas como no privado (lançamentos, metas, resumos, lembretes, áudio, cupom), e as respostas, resumos automáticos e lembretes vão para o grupo.
+- Menções (`@bot uber 20`) são removidas do texto antes do parser; reações, edições e mensagens de protocolo são ignoradas.
 
 **Integração com o fluxo financeiro**
 
@@ -90,6 +105,17 @@ Coloca binários/modelo em `vendor/` (gitignored, exceto `.gitkeep`). Ver secç�
 ```bash
 yarn bootstrap
 ```
+
+**macOS sem Docker** (Postgres 16 via Homebrew, usuário/banco iguais aos do compose):
+
+```bash
+corepack enable        # disponibiliza o yarn 1.22 fixado no package.json
+brew install ffmpeg    # áudio do WhatsApp
+yarn install
+yarn bootstrap:mac     # instala/inicia postgresql@16, cria finance/finance_zap, migra e faz seed
+```
+
+Para parar o banco: `brew services stop postgresql@16`.
 
 **Passo a passo:**
 
@@ -140,8 +166,9 @@ Variáveis úteis: `PORT`, `LOG_LEVEL`, `DEFAULT_TIMEZONE`, `WHISPER_LANG`, `WHI
 | `MEDIA_STORAGE_DIR` | Arquivos de mídia recebidos |
 | `DEFAULT_TIMEZONE` | Fuso padrão de novos usuários / relatórios |
 | `DEFAULT_LOCALE` | Locale (pt-BR) |
-| `TESSERACT_LANG` | Idiomas OCR (ex.: `por+eng`) |
+| `TESSERACT_LANG` | Idiomas do OCR (padrão `por`; use `por+eng` para cupons mistos) |
 | `WHISPER_CLI_PATH` / `WHISPER_MODEL_PATH` | Transcrição local |
+| `WHISPER_LANG` / `WHISPER_PROMPT` | Idioma (`pt`) e contexto PT-BR da transcrição (vazio = padrão embutido, `off` desativa) |
 | `FFMPEG_PATH` | Conversão de áudio |
 | `REMINDER_DEFAULT_DAY_HOUR` | Hora local (0–23) para lembretes só com data |
 | `REMINDER_EARLY_MINUTES` | Antecedência padrão para compromissos com hora (minutos) |
@@ -190,7 +217,7 @@ curl -s -X POST http://localhost:3009/dev/simulate-text \
 
 ## OCR
 
-Implementação: `TesseractOcrProvider` (`tesseract.js` + **sharp**). Ajuste `TESSERACT_LANG` para cupons mistos PT/EN.
+Implementação: `TesseractOcrProvider` (`tesseract.js` + **sharp**). Padrão em português (`TESSERACT_LANG=por`); use `por+eng` para cupons mistos PT/EN.
 
 ### Comprovantes (cupom / NF)
 
@@ -203,6 +230,8 @@ Setup local em `vendor/`:
 ```bash
 yarn setup:audio
 ```
+
+Modelo padrão: `ggml-small.bin` (~466 MB), bem mais preciso em PT-BR que o `base`. Outro modelo: `FZ_WHISPER_MODEL=ggml-medium.bin yarn setup:audio`. A transcrição roda com `-l pt` e um prompt de contexto PT-BR (`WHISPER_PROMPT`).
 
 Requisitos extras: `git`, `cmake`, C++ toolchain (Xcode CLT / `build-essential`). No macOS Apple Silicon o script pode habilitar Metal. **Windows:** release ZIP do whisper.cpp. **macOS sem ffmpeg no PATH:** download opcional para `vendor/ffmpeg/`.
 
@@ -236,7 +265,7 @@ Inclui testes de parser financeiro, **parser de lembretes** (`reminder-nl-parser
 - Agenda: recorrências avançadas (RRULE completo), fusos diferentes por lembrete e múltiplos lembretes no mesmo minuto não são o foco; deduplicação é por `(reminderId, slotAt)`.
 - Para evento **único com hora**, há **um** disparo no horário de aviso (antecipado), não um segundo “é agora” (comportamento intencional para MVP).
 - OCR e transcrição dependem de qualidade e configuração.
-- Grupos `@g.us` são ignorados.
+- Em **grupos**, qualquer participante pode lançar, consultar e também usar `apagar todos os dados` da conta do grupo.
 - Reprocessamento de mensagem por ID ainda não implementado.
 
 ## Estrutura (`src/`)

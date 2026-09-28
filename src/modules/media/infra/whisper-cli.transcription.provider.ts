@@ -82,7 +82,7 @@ export class WhisperCliTranscriptionProvider implements TranscriptionProvider {
       p.on('error', reject);
       p.on('close', (code) => {
         if (code === 0) resolve();
-        else reject(new Error(`whisper CLI exited with code ${String(code ?? 'unknown')}`));
+        else reject(new Error(`whisper-cli terminou com código ${String(code ?? 'desconhecido')}`));
       });
     });
   }

@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -29,7 +30,7 @@ const VENDOR_FFMPEG = join(ROOT, 'vendor', 'ffmpeg');
 const WHISPER_TAG = 'v1.8.4';
 const WIN_ZIP_URL = `https://github.com/ggml-org/whisper.cpp/releases/download/${WHISPER_TAG}/whisper-blas-bin-x64.zip`;
 
-const MODEL_FILE = process.env.FZ_WHISPER_MODEL?.trim() || 'ggml-base.bin';
+const MODEL_FILE = process.env.FZ_WHISPER_MODEL?.trim() || 'ggml-small.bin';
 const MODEL_URL = `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${MODEL_FILE}`;
 
 const platform = process.platform;

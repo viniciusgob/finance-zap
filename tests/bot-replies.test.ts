@@ -22,18 +22,11 @@ describe('bot-replies', () => {
   });
 
   it('confirmação de gasto inclui seções esperadas', () => {
-    const msg = replyExpenseRegistered(
-      new Decimal('50'),
-      'Mercado',
-      'Alimentação',
-      'Hoje',
-      new Decimal('1200'),
-    );
+    const msg = replyExpenseRegistered(new Decimal('50'), 'Mercado', 'Alimentação', 'Hoje');
     expect(msg).toContain('Gasto registrado');
     expect(msg).toContain('Mercado');
     expect(msg).toContain('Alimentação');
-    expect(msg).toContain('Saldo:');
-    expect(msg).toMatch(/1\.200/);
+    expect(msg).not.toContain('Saldo do dia');
   });
 
   it('confirmação de categoria inclui valor, categoria e opções de resposta', () => {

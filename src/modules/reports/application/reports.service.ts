@@ -1,5 +1,14 @@
-import { addDays, addMonths, startOfDay, startOfMonth, subMonths } from 'date-fns';
-import { toZonedTime, fromZonedTime } from 'date-fns-tz';
+import {
+  addDays,
+  addMonths,
+  addWeeks,
+  startOfDay,
+  startOfMonth,
+  startOfWeek,
+  subMonths,
+  subWeeks,
+} from 'date-fns';
+import { formatInTimeZone, toZonedTime, fromZonedTime } from 'date-fns-tz';
 import { Decimal } from 'decimal.js';
 import type { Category, Transaction } from '@prisma/client';
 import type { CategoryRepository } from '../../categories/infra/category.repository.js';
@@ -22,6 +31,22 @@ export interface DailySummary {
   balance: Decimal;
   start: Date;
   endExclusive: Date;
+}
+
+export interface WeeklySummary {
+  /** Ex.: "21/09 a 27/09". */
+  rangeLabel: string;
+  income: Decimal;
+  expense: Decimal;
+  balance: Decimal;
+  start: Date;
+  endExclusive: Date;
+}
+
+export interface DayExpenseRow {
+  /** Ex.: "seg 21/09". */
+  dayLabel: string;
+  total: Decimal;
 }
 
 export interface CategoryBreakdownRow {
@@ -73,6 +98,21 @@ export class ReportsService {
       timeZone,
     }).format(rangeStart);
     return { start: rangeStart, endExclusive: rangeEndExclusive, dayLabel, weekdayLabel };
+  }
+
+  /** Semana de segunda a domingo no fuso do usuário (mesma regra das metas semanais). */
+  private zonedWeekRange(
+    reference: Date,
+    timeZone: string,
+    weekOffset: number,
+  ): { start: Date; endExclusive: Date; label: string; localStart: Date } {
+    const zRef = subWeeks(toZonedTime(reference, timeZone), weekOffset);
+    const localStart = startOfWeek(zRef, { weekStartsOn: 1 });
+    const rangeStart = fromZonedTime(localStart, timeZone);
+    const rangeEndExclusive = fromZonedTime(addWeeks(localStart, 1), timeZone);
+    const lastDay = fromZonedTime(addDays(localStart, 6), timeZone);
+    const label = `${formatInTimeZone(rangeStart, timeZone, 'dd/MM')} a ${formatInTimeZone(lastDay, timeZone, 'dd/MM')}`;
+    return { start: rangeStart, endExclusive: rangeEndExclusive, label, localStart };
   }
 
   private aggregateIncomeExpense(
@@ -196,6 +236,76 @@ export class ReportsService {
   ): Promise<Array<Transaction & { category: Category | null }>> {
     const { start, endExclusive } = this.zonedMonthRange(reference, timeZone, 0);
     return this.transactions.topExpenses(userId, start, endExclusive, take);
+  }
+
+  async weeklySummary(
+    userId: string,
+    timeZone: string,
+    reference = new Date(),
+    weekOffset = 0,
+  ): Promise<WeeklySummary> {
+    const { start, endExclusive, label } = this.zonedWeekRange(reference, timeZone, weekOffset);
+    const agg = await this.transactions.aggregateMonth(userId, start, endExclusive);
+    const { income, expense } = this.aggregateIncomeExpense(agg);
+    return {
+      rangeLabel: label,
+      income,
+      expense,
+      balance: income.minus(expense),
+      start,
+      endExclusive,
+    };
+  }
+
+  async categoryBreakdownWeek(
+    userId: string,
+    timeZone: string,
+    reference = new Date(),
+    weekOffset = 0,
+  ): Promise<CategoryBreakdownRow[]> {
+    const { start, endExclusive } = this.zonedWeekRange(reference, timeZone, weekOffset);
+    return this.mapCategoryExpenseBreakdown(userId, start, endExclusive);
+  }
+
+  async topExpensesWeek(
+    userId: string,
+    timeZone: string,
+    take: number,
+    reference = new Date(),
+    weekOffset = 0,
+  ): Promise<Array<Transaction & { category: Category | null }>> {
+    const { start, endExclusive } = this.zonedWeekRange(reference, timeZone, weekOffset);
+    return this.transactions.topExpenses(userId, start, endExclusive, take);
+  }
+
+  /** Total de gastos por dia da semana (só dias com gasto, de segunda a domingo). */
+  async expensesByDayWeek(
+    userId: string,
+    timeZone: string,
+    reference = new Date(),
+    weekOffset = 0,
+  ): Promise<DayExpenseRow[]> {
+    const { start, endExclusive, localStart } = this.zonedWeekRange(
+      reference,
+      timeZone,
+      weekOffset,
+    );
+    const rows = await this.transactions.listExpensesInRange(userId, start, endExclusive);
+    const byKey = new Map<string, Decimal>();
+    for (const r of rows) {
+      const key = formatInTimeZone(r.occurredAt, timeZone, 'yyyy-MM-dd');
+      byKey.set(key, (byKey.get(key) ?? new Decimal(0)).plus(r.amount.toString()));
+    }
+    const weekday = new Intl.DateTimeFormat('pt-BR', { weekday: 'short', timeZone });
+    const out: DayExpenseRow[] = [];
+    for (let i = 0; i < 7; i++) {
+      const dayUtc = fromZonedTime(addDays(localStart, i), timeZone);
+      const total = byKey.get(formatInTimeZone(dayUtc, timeZone, 'yyyy-MM-dd'));
+      if (!total || total.isZero()) continue;
+      const wd = weekday.format(dayUtc).replace('.', '');
+      out.push({ dayLabel: `${wd} ${formatInTimeZone(dayUtc, timeZone, 'dd/MM')}`, total });
+    }
+    return out;
   }
 
   async latestTransactions(userId: string, take: number): Promise<Transaction[]> {

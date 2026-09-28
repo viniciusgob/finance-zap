@@ -61,7 +61,7 @@ RUN mkdir -p /opt/whisper-models \
 ENV WHISPER_CLI_PATH=/usr/local/bin/whisper-cli
 ENV WHISPER_MODEL_PATH=/opt/whisper-models/${WHISPER_MODEL_FILE}
 ENV FFMPEG_PATH=ffmpeg
-ENV TESSERACT_LANG=por+eng
+ENV TESSERACT_LANG=por
 ENV WHISPER_LANG=pt
 
 RUN corepack enable && corepack prepare yarn@1.22.22 --activate \

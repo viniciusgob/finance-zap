@@ -37,7 +37,7 @@ services:
       MEDIA_STORAGE_DIR: /data/media
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-America/Sao_Paulo}
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-pt-BR}
-      TESSERACT_LANG: ${TESSERACT_LANG:-por+eng}
+      TESSERACT_LANG: ${TESSERACT_LANG:-por}
       WHISPER_LANG: ${WHISPER_LANG:-pt}
       WHISPER_PROMPT: ${WHISPER_PROMPT:-}
       RUN_SEED: ${RUN_SEED:-true}

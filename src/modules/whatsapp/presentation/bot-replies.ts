@@ -1,8 +1,10 @@
 import { Decimal } from 'decimal.js';
 import type {
   DailySummary,
+  DayExpenseRow,
   MonthlySummary,
   CategoryBreakdownRow,
+  WeeklySummary,
 } from '../../reports/application/reports.service.js';
 import type { Transaction } from '@prisma/client';
 import type { TransactionType } from '../../../shared/types/prisma-enums.js';
@@ -126,11 +128,11 @@ export function replyCompoundStoppedForConfirmation(remaining: number): string {
 }
 
 export function replyAskReportScope(): string {
-  return [fzSection('📊', 'Resumo'), 'Qual período?', '', '• hoje', '• mês'].join('\n');
+  return [fzSection('📊', 'Resumo'), 'Qual período?', '', '• hoje', '• semana', '• mês'].join('\n');
 }
 
 export function replyReportScopeUnclear(): string {
-  return [fzSection('📊', 'Resumo'), 'Responda:', '', '• hoje', '• mês'].join('\n');
+  return [fzSection('📊', 'Resumo'), 'Responda:', '', '• hoje', '• semana', '• mês'].join('\n');
 }
 
 export function replyExpenseRegistered(
@@ -138,13 +140,11 @@ export function replyExpenseRegistered(
   place: string,
   category: string,
   _occurredLabel: string,
-  dayBalance?: Decimal | null,
+  goalLines: string[] = [],
 ): string {
   const money = formatMoney(amount);
   const lines = ['✅ *Gasto registrado*', '', `💸 ${money}`, `🏷️ ${category}`, '', `📌 ${place}`];
-  if (dayBalance != null) {
-    lines.push('', `📊 Saldo: ${formatMoney(dayBalance)}`);
-  }
+  lines.push(...goalLines);
   return lines.join('\n');
 }
 
@@ -157,7 +157,7 @@ export function replyIncomeRegistered(
   const money = formatMoney(amount);
   const lines = ['✅ *Receita registrada*', '', `💵 ${money}`, '', `📌 ${label}`];
   if (dayBalance != null) {
-    lines.push('', `📊 Saldo: ${formatMoney(dayBalance)}`);
+    lines.push('', `📊 Saldo do dia: ${formatMoney(dayBalance)}`);
   }
   return lines.join('\n');
 }
@@ -171,7 +171,7 @@ export function replyTransferRegistered(
   const money = formatMoney(amount);
   const lines = ['✅ *Transferência registrada*', '', `↔️ ${money}`, '', `📌 ${label}`];
   if (dayBalance != null) {
-    lines.push('', `📊 Saldo: ${formatMoney(dayBalance)}`);
+    lines.push('', `📊 Saldo do dia: ${formatMoney(dayBalance)}`);
   }
   return lines.join('\n');
 }
@@ -222,6 +222,65 @@ export function replyMonthLedger(
     });
   } else {
     lines.push('', 'Sem gastos por categoria neste mês.');
+  }
+
+  return lines.join('\n');
+}
+
+/**
+ * Resumo de uma única semana (segunda a domingo). Só entram lançamentos dessa semana —
+ * nenhum valor de outra semana aparece aqui.
+ */
+export function replyWeekLedger(
+  current: WeeklySummary,
+  breakdown: CategoryBreakdownRow[],
+  byDay: DayExpenseRow[],
+  top: Transaction[],
+  opts: { lastWeek?: boolean } = {},
+): string {
+  const title = opts.lastWeek ? 'Resumo da semana passada' : 'Resumo da semana';
+  const header = [fzSection('📊', title), current.rangeLabel];
+  if (current.income.isZero() && current.expense.isZero()) {
+    return [
+      ...header,
+      '',
+      opts.lastWeek ? 'Nenhum lançamento na semana passada.' : 'Nenhum lançamento nesta semana.',
+      '',
+      'Exemplos:',
+      '',
+      '• uber 15',
+      '• almoço 35',
+    ].join('\n');
+  }
+
+  const lines: string[] = [
+    ...header,
+    '',
+    `💵 Entradas ${formatMoney(current.income)}`,
+    `💸 Saídas ${formatMoney(current.expense)}`,
+    `⚖️ Saldo ${formatMoney(current.balance)}`,
+  ];
+
+  if (byDay.length > 0) {
+    lines.push('', fzSection('🗓️', 'Gastos por dia'));
+    byDay.forEach((d) => {
+      lines.push(`${d.dayLabel} — ${formatMoney(d.total)}`);
+    });
+  }
+
+  if (breakdown.length > 0) {
+    lines.push('', fzSection('📂', 'Gastos por categoria'));
+    breakdown.slice(0, 8).forEach((r, i) => {
+      lines.push(`${String(i + 1)}. ${r.categoryName} — ${formatMoney(r.total)}`);
+    });
+  }
+
+  if (top.length > 0) {
+    lines.push('', fzSection('📋', 'Maiores gastos'));
+    top.forEach((t, i) => {
+      const amt = new Decimal(t.amount.toString());
+      lines.push(`${String(i + 1)}. ${t.description.slice(0, 38)} — ${formatMoney(amt)}`);
+    });
   }
 
   return lines.join('\n');
@@ -344,7 +403,7 @@ export function replyIntro(): string {
     '',
     'Ex.: uber 23,50 · recebi 1500 · dia 10 pagar conta · amanhã 15h dentista',
     '',
-    'Comandos: *ajuda* · *resumo* · *agenda*',
+    'Comandos: *ajuda* · *resumo* · *agenda* · *metas*',
   ].join('\n');
 }
 
@@ -373,10 +432,35 @@ export function replyHelp(): string {
     '• agenda de hoje',
     '• cancelar lembrete do aluguel',
     '',
+    '*Metas de gasto*',
+    '',
+    'Defina um limite de gasto e a cada despesa eu mostro quanto ainda resta.',
+    '',
+    '_Como usar_',
+    '',
+    '• meta semanal 300 — limite para todos os gastos',
+    '• meta mensal mercado 800 — limite só de uma categoria',
+    '• meta diária transporte 40',
+    '• metas — ver o saldo de cada meta',
+    '• apagar meta semanal',
+    '• apagar meta de mercado',
+    '• apagar todas as metas',
+    '',
+    '_Como funciona_',
+    '',
+    '• Períodos: diária, semanal (segunda a domingo) ou mensal. Sem período, fica mensal.',
+    '• Cada gasto conta na meta geral e na meta da categoria dele.',
+    '• Ex.: meta semanal 300 e depois uber 20 → saldo R$ 280,00.',
+    '• Aviso quando restar 20% ou menos e quando a meta estourar.',
+    '• Definir de novo a mesma meta troca o valor.',
+    '• O saldo recomeça a cada novo dia, semana ou mês.',
+    '',
     '*Consultar finanças*',
     '',
-    '• resumo (depois: hoje ou mês)',
+    '• resumo (depois: hoje, semana ou mês)',
     '• quanto gastei hoje',
+    '• resumo da semana (segunda a domingo)',
+    '• resumo da semana passada',
     '• últimos lançamentos',
     '• onde gastei mais',
     '',
@@ -390,7 +474,7 @@ export function replyHelp(): string {
     '',
     '• apagar todos os dados',
     '',
-    'Remove também lembretes e agenda. Irreversível.',
+    'Remove também lembretes, agenda e metas. Irreversível.',
     '',
     '*Áudio e foto*',
     '',
@@ -401,7 +485,7 @@ export function replyHelp(): string {
 export function replyAccountDataWiped(): string {
   return [
     fzSection('✅', 'Dados apagados'),
-    'Lançamentos, lembretes, categorias personalizadas, regras e histórico foram removidos.',
+    'Lançamentos, lembretes, metas, categorias personalizadas, regras e histórico foram removidos.',
     '',
     'Esta ação não pode ser desfeita.',
   ].join('\n');

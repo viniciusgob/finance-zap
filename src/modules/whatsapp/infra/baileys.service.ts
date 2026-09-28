@@ -2,7 +2,6 @@ import {
   DisconnectReason,
   downloadMediaMessage,
   fetchLatestBaileysVersion,
-  getContentType,
   makeCacheableSignalKeyStore,
   makeWASocket,
   useMultiFileAuthState,
@@ -10,12 +9,14 @@ import {
   type WASocket,
 } from '@whiskeysockets/baileys';
 import { MessageProvider, MessageType } from '../../../shared/types/prisma-enums.js';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import type { Logger } from 'pino';
 import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import { env } from '../../../config/env.js';
 import type { NormalizedIngestMessage } from '../../../shared/domain/ingest-message.js';
+import { isGroupJid, isUnsupportedChatJid } from '../../../shared/utils/whatsapp-jid.js';
+import { extractInboundContent } from './inbound-content.js';
 import type { IngestInboundUseCase } from '../../messages/application/ingest-inbound.use-case.js';
 import type { OutboundMessagesPort } from '../ports/outbound-messages.port.js';
 
@@ -55,16 +56,19 @@ export class BaileysOutboundAdapter implements OutboundMessagesPort {
   async sendText(toJid: string, text: string): Promise<void> {
     const sock = this.getSocket();
     if (!sock) {
-      throw new Error('WhatsApp socket not ready');
+      throw new Error('Conexão com o WhatsApp ainda não está pronta');
     }
     await sock.sendMessage(toJid, { text });
   }
 }
 
+const GROUP_SUBJECT_TTL_MS = 10 * 60_000;
+
 export class BaileysService {
   private sock: WASocket | null = null;
   private waSessionOpen = false;
   private readonly logger: Logger;
+  private readonly groupSubjects = new Map<string, { subject: string | null; at: number }>();
 
   constructor(
     private readonly ingest: IngestInboundUseCase,
@@ -128,10 +132,20 @@ export class BaileysService {
       }
       if (connection === 'close') {
         this.waSessionOpen = false;
-        const err = lastDisconnect?.error as { output?: { statusCode?: number } } | undefined;
-        const shouldReconnect = err?.output?.statusCode !== DisconnectReason.loggedOut;
-        this.logger.warn({ shouldReconnect }, 'Conexão WhatsApp encerrada');
-        if (shouldReconnect) {
+        const err = lastDisconnect?.error as
+          | { message?: string; output?: { statusCode?: number } }
+          | undefined;
+        const statusCode = err?.output?.statusCode;
+        const loggedOut = statusCode === DisconnectReason.loggedOut;
+        this.logger.warn(
+          { statusCode, reason: err?.message, shouldReconnect: !loggedOut },
+          'Conexão WhatsApp encerrada',
+        );
+        if (loggedOut) {
+          // Sessão invalidada pelo WhatsApp: descarta credenciais e gera um novo QR.
+          this.logger.warn('Sessão deslogada pelo WhatsApp — gerando novo QR Code');
+          void rm(env.BAILEYS_AUTH_DIR, { recursive: true, force: true }).then(() => this.start());
+        } else {
           void this.start();
         }
       } else if (connection === 'open') {
@@ -145,6 +159,21 @@ export class BaileysService {
     });
   }
 
+  /** Nome do grupo (cache de 10 min) — vira o nome da conta compartilhada. */
+  private async groupSubject(sock: WASocket, jid: string): Promise<string | null> {
+    const cached = this.groupSubjects.get(jid);
+    if (cached && Date.now() - cached.at < GROUP_SUBJECT_TTL_MS) return cached.subject;
+    let subject: string | null = null;
+    try {
+      const name = (await sock.groupMetadata(jid)).subject.trim();
+      subject = name !== '' ? name : null;
+    } catch (err) {
+      this.logger.warn({ err, jid }, 'Não consegui ler o nome do grupo');
+    }
+    this.groupSubjects.set(jid, { subject, at: Date.now() });
+    return subject;
+  }
+
   private async handleMessagesUpsert(
     sock: WASocket,
     silent: Logger,
@@ -154,35 +183,32 @@ export class BaileysService {
     for (const msg of upsert.messages) {
       if (!msg.message || msg.key.fromMe) continue;
       const remote = msg.key.remoteJid;
-      if (!remote || remote.endsWith('@g.us')) continue;
+      if (!remote || isUnsupportedChatJid(remote)) continue;
       const providerMessageId = msg.key.id ?? '';
       if (!providerMessageId) continue;
 
-      const contentType = getContentType(msg.message);
-      const textBody =
-        msg.message.conversation ??
-        msg.message.extendedTextMessage?.text ??
-        msg.message.imageMessage?.caption ??
-        msg.message.videoMessage?.caption ??
-        msg.message.documentMessage?.caption ??
-        null;
-
-      const mime =
-        msg.message.imageMessage?.mimetype ??
-        msg.message.audioMessage?.mimetype ??
-        msg.message.documentMessage?.mimetype ??
-        msg.message.videoMessage?.mimetype ??
-        undefined;
+      const inbound = extractInboundContent(msg.message);
+      if (!inbound) continue;
+      const { contentType, text: textBody, mime } = inbound;
+      const isGroup = isGroupJid(remote);
+      this.logger.info(
+        { from: remote, participant: msg.key.participant ?? undefined, id: msg.key.id, isGroup },
+        'Mensagem recebida',
+      );
 
       const tsSec =
         typeof msg.messageTimestamp === 'number' && Number.isFinite(msg.messageTimestamp)
           ? msg.messageTimestamp
           : Math.floor(Date.now() / 1000);
 
-      const pushName =
+      const senderName =
         typeof (msg as { pushName?: string }).pushName === 'string'
           ? (msg as { pushName: string }).pushName
           : undefined;
+      // Em grupo a conta é do grupo: o nome dela é o do grupo, não o de quem mandou.
+      const pushName = isGroup
+        ? ((await this.groupSubject(sock, remote)) ?? undefined)
+        : senderName;
 
       const normalized: NormalizedIngestMessage = {
         provider: MessageProvider.WHATSAPP,

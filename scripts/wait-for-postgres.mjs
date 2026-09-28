@@ -24,7 +24,7 @@ async function main() {
   for (let i = 0; i < maxAttempts; i++) {
     try {
       await tryConnect();
-      console.warn(`[finance-zap] Postgres reachable at ${host}:${String(port)}`);
+      console.warn(`[finance-zap] Postgres acessível em ${host}:${String(port)}`);
       return;
     } catch {
       process.stdout.write('.');
@@ -32,7 +32,7 @@ async function main() {
     }
   }
   console.error(
-    `\n[finance-zap] Postgres not reachable at ${host}:${String(port)} after ${String(maxAttempts)}s`,
+    `\n[finance-zap] Postgres inacessível em ${host}:${String(port)} após ${String(maxAttempts)}s`,
   );
   process.exit(1);
 }

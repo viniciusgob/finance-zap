@@ -23,3 +23,6 @@ export const CategoryKind = $Enums.CategoryKind;
 
 export type RecurringFrequency = $Enums.RecurringFrequency;
 export const RecurringFrequency = $Enums.RecurringFrequency;
+
+export type GoalPeriod = $Enums.GoalPeriod;
+export const GoalPeriod = $Enums.GoalPeriod;

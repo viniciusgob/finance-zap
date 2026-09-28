@@ -105,6 +105,44 @@ export class TransactionRepository {
     });
   }
 
+  /** Soma das despesas no intervalo; `categoryId` undefined = todas as categorias. */
+  async sumExpenses(
+    userId: string,
+    start: Date,
+    end: Date,
+    categoryId?: string,
+  ): Promise<Prisma.Decimal | null> {
+    const agg = await prisma.transaction.aggregate({
+      where: {
+        userId,
+        deletedAt: null,
+        type: 'EXPENSE',
+        occurredAt: { gte: start, lt: end },
+        NOT: { status: 'CANCELLED' },
+        ...(categoryId !== undefined ? { categoryId } : {}),
+      },
+      _sum: { amount: true },
+    });
+    return agg._sum.amount;
+  }
+
+  async listExpensesInRange(
+    userId: string,
+    start: Date,
+    end: Date,
+  ): Promise<{ amount: Prisma.Decimal; occurredAt: Date }[]> {
+    return prisma.transaction.findMany({
+      where: {
+        userId,
+        deletedAt: null,
+        type: 'EXPENSE',
+        occurredAt: { gte: start, lt: end },
+        NOT: { status: 'CANCELLED' },
+      },
+      select: { amount: true, occurredAt: true },
+    });
+  }
+
   async topExpenses(
     userId: string,
     start: Date,

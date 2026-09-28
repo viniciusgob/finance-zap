@@ -26,6 +26,8 @@
     "db:up": "docker compose up -d postgres",
     "db:ready": "node scripts/wait-for-postgres.mjs",
     "bootstrap": "yarn setup:env && yarn db:up && yarn db:ready && yarn prisma:generate && yarn prisma:migrate:deploy && yarn prisma:seed",
+    "db:up:mac": "sh scripts/setup-postgres-mac.sh",
+    "bootstrap:mac": "yarn setup:env && yarn db:up:mac && yarn prisma:generate && yarn prisma:migrate:deploy && yarn prisma:seed",
     "docker:up": "docker compose up --build",
     "docker:up:detached": "docker compose up --build -d",
     "docker:down": "docker compose down",
@@ -38,7 +40,7 @@
   "dependencies": {
     "@fastify/sensible": "^6.0.3",
     "@prisma/client": "^6.5.0",
-    "@whiskeysockets/baileys": "^6.7.21",
+    "@whiskeysockets/baileys": "~6.7.24",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
     "decimal.js": "^10.5.0",

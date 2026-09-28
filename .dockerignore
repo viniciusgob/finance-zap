@@ -5,7 +5,7 @@ dist
 *.md
 .env
 !.env.example
-baileys_auth
+baileys_auth*
 storage
 vendor
 coverage
@@ -14,3 +14,4 @@ coverage
 terminals
 *.log
 .DS_Store
+*.traineddata
