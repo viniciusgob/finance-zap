@@ -1,0 +1,52 @@
+FINANCE ZAP — COMO INICIAR E ENCERRAR (macOS)
+=============================================
+
+Todos os comandos rodam no Terminal, dentro da pasta do projeto:
+
+    cd ~/Documents/Projetos/WPP/finance-zap-main
+
+
+INICIAR
+-------
+
+1) Banco de dados (só se estiver parado):
+
+    brew services start postgresql@16
+
+   O Postgres volta sozinho quando o Mac liga, então normalmente não precisa.
+   Se ele já estiver rodando, o comando apenas avisa.
+
+2) Bot + API (porta 3009):
+
+    yarn dev
+
+   - Na primeira vez (ou se a sessão cair) aparece o QR Code no terminal:
+     WhatsApp > Aparelhos conectados > Conectar aparelho.
+   - Nas próximas vezes conecta sozinho (sessão salva em baileys_auth/).
+
+
+ENCERRAR
+--------
+
+1) Bot: aperte Ctrl + C no terminal onde o "yarn dev" está rodando.
+
+   Se não achar o terminal (ou o bot foi iniciado em segundo plano):
+
+    pkill -f "src/app/server.ts"
+
+2) Banco (opcional):
+
+    brew services stop postgresql@16
+
+   Com o banco parado, o bot não funciona até iniciar de novo.
+
+
+LEMBRETES
+---------
+
+- O bot só funciona enquanto o "yarn dev" estiver rodando. Se o Mac dormir
+  ou desligar, ele para de responder no WhatsApp.
+- Fechar o terminal onde está o "yarn dev" também encerra o bot.
+- Conferir se o bot está no ar:
+
+    curl http://localhost:3009/health
